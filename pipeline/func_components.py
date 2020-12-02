@@ -45,3 +45,7 @@ def load_raw_data(project_id: str,
 
 ## FOR TESTING ##
 #load_raw_data('', source_bucket_name='amazing-public-data', prefix='bearing_sensor_data/bearing_sensor_data/', dest_bucket_name='rrusson-kubeflow-test', dest_file_name='raw_data.csv')
+
+
+def train_test_split():
+    pass

@@ -1,0 +1,152 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: bearing-sensor-data-training-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.0.4, pipelines.kubeflow.org/pipeline_compilation_time: '2020-12-02T03:43:01.838874',
+    pipelines.kubeflow.org/pipeline_spec: '{"description": "The pipeline for training
+      and deploying an anomaly detector based on an autoencoder", "inputs": [{"name":
+      "project_id"}, {"name": "source_bucket_name"}, {"name": "prefix"}, {"name":
+      "dest_bucket_name"}, {"name": "dest_file_name"}, {"default": "US", "name": "dataset_location",
+      "optional": true}], "name": "Bearing Sensor Data Training"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.0.4}
+spec:
+  entrypoint: bearing-sensor-data-training
+  templates:
+  - name: bearing-sensor-data-training
+    inputs:
+      parameters:
+      - {name: dest_bucket_name}
+      - {name: dest_file_name}
+      - {name: prefix}
+      - {name: project_id}
+      - {name: source_bucket_name}
+    dag:
+      tasks:
+      - name: load-raw-data
+        template: load-raw-data
+        arguments:
+          parameters:
+          - {name: dest_bucket_name, value: '{{inputs.parameters.dest_bucket_name}}'}
+          - {name: dest_file_name, value: '{{inputs.parameters.dest_file_name}}'}
+          - {name: prefix, value: '{{inputs.parameters.prefix}}'}
+          - {name: project_id, value: '{{inputs.parameters.project_id}}'}
+          - {name: source_bucket_name, value: '{{inputs.parameters.source_bucket_name}}'}
+  - name: load-raw-data
+    container:
+      args: [--project-id, '{{inputs.parameters.project_id}}', --source-bucket-name,
+        '{{inputs.parameters.source_bucket_name}}', --prefix, '{{inputs.parameters.prefix}}',
+        --dest-bucket-name, '{{inputs.parameters.dest_bucket_name}}', --dest-file-name,
+        '{{inputs.parameters.dest_file_name}}', '----output-paths', /tmp/outputs/dest_bucket_name/data,
+        /tmp/outputs/dest_file_name/data]
+      command:
+      - python3
+      - -u
+      - -c
+      - "def load_raw_data(project_id, \n                  source_bucket_name, \n\
+        \                  prefix,\n                  dest_bucket_name,\n        \
+        \          dest_file_name):\n\n    \"\"\"Retrieves the sample files, combines\
+        \ them, and outputs the desting location in GCS.\"\"\"\n    import pandas\
+        \ as pd\n    import numpy as np\n    from io import StringIO\n    from google.cloud\
+        \ import storage\n\n    # Get the raw files out of GCS public bucket\n   \
+        \ merged_data = pd.DataFrame()\n    client = storage.Client()\n    blobs =\
+        \ client.list_blobs(source_bucket_name, prefix=prefix)\n\n    for blob in\
+        \ blobs:\n        dataset = pd.read_csv(\"gs://{0}/{1}\".format(source_bucket_name,\
+        \ blob.name), sep='\\t')\n        dataset_mean_abs = np.array(dataset.abs().mean())\n\
+        \        dataset_mean_abs = pd.DataFrame(dataset_mean_abs.reshape(1, 4))\n\
+        \        dataset_mean_abs.index = [blob.name.split(\"/\")[-1]]\n        merged_data\
+        \ = merged_data.append(dataset_mean_abs)\n\n    merged_data.columns = ['bearing-1',\
+        \ 'bearing-2', 'bearing-3', 'bearing-4']\n\n    # Transform data file index\
+        \ to datetime and sort in chronological order\n    merged_data.index = pd.to_datetime(merged_data.index,\
+        \ format='%Y.%m.%d.%H.%M.%S')\n    merged_data = merged_data.sort_index()\n\
+        \n    # Drop the raw_data into a bucket\n    #DEST_FILE_NAME = \"raw_data.csv\"\
+        \n    #DEST_BUCKET_NAME = \"rrusson-kubeflow-test\"\n    f = StringIO()\n\
+        \    merged_data.to_csv(f)\n    f.seek(0)\n    client.get_bucket(dest_bucket_name).blob(dest_file_name).upload_from_file(f,\
+        \ content_type='text/csv')\n\n    return (dest_bucket_name, dest_file_name)\n\
+        \ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,\
+        \ str):\n        raise TypeError('Value \"{}\" has type \"{}\" instead of\
+        \ str.'.format(str(str_value), str(type(str_value))))\n    return str_value\n\
+        \nimport argparse\n_parser = argparse.ArgumentParser(prog='Load raw data',\
+        \ description='Retrieves the sample files, combines them, and outputs the\
+        \ desting location in GCS.')\n_parser.add_argument(\"--project-id\", dest=\"\
+        project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+        --source-bucket-name\", dest=\"source_bucket_name\", type=str, required=True,\
+        \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--prefix\", dest=\"prefix\"\
+        , type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+        --dest-bucket-name\", dest=\"dest_bucket_name\", type=str, required=True,\
+        \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--dest-file-name\", dest=\"\
+        dest_file_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+        ----output-paths\", dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args\
+        \ = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"_output_paths\"\
+        , [])\n\n_outputs = load_raw_data(**_parsed_args)\n\n_output_serializers =\
+        \ [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,\
+        \ output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n\
+        \    except OSError:\n        pass\n    with open(output_file, 'w') as f:\n\
+        \        f.write(_output_serializers[idx](_outputs[idx]))\n"
+      image: gcr.io/mwpmltr/rrusson_kubeflow_base:v1
+    inputs:
+      parameters:
+      - {name: dest_bucket_name}
+      - {name: dest_file_name}
+      - {name: prefix}
+      - {name: project_id}
+      - {name: source_bucket_name}
+    outputs:
+      artifacts:
+      - {name: load-raw-data-dest_bucket_name, path: /tmp/outputs/dest_bucket_name/data}
+      - {name: load-raw-data-dest_file_name, path: /tmp/outputs/dest_file_name/data}
+    metadata:
+      annotations: {pipelines.kubeflow.org/component_spec: '{"description": "Retrieves
+          the sample files, combines them, and outputs the desting location in GCS.",
+          "implementation": {"container": {"args": ["--project-id", {"inputValue":
+          "project_id"}, "--source-bucket-name", {"inputValue": "source_bucket_name"},
+          "--prefix", {"inputValue": "prefix"}, "--dest-bucket-name", {"inputValue":
+          "dest_bucket_name"}, "--dest-file-name", {"inputValue": "dest_file_name"},
+          "----output-paths", {"outputPath": "dest_bucket_name"}, {"outputPath": "dest_file_name"}],
+          "command": ["python3", "-u", "-c", "def load_raw_data(project_id, \n                  source_bucket_name,
+          \n                  prefix,\n                  dest_bucket_name,\n                  dest_file_name):\n\n    \"\"\"Retrieves
+          the sample files, combines them, and outputs the desting location in GCS.\"\"\"\n    import
+          pandas as pd\n    import numpy as np\n    from io import StringIO\n    from
+          google.cloud import storage\n\n    # Get the raw files out of GCS public
+          bucket\n    merged_data = pd.DataFrame()\n    client = storage.Client()\n    blobs
+          = client.list_blobs(source_bucket_name, prefix=prefix)\n\n    for blob in
+          blobs:\n        dataset = pd.read_csv(\"gs://{0}/{1}\".format(source_bucket_name,
+          blob.name), sep=''\\t'')\n        dataset_mean_abs = np.array(dataset.abs().mean())\n        dataset_mean_abs
+          = pd.DataFrame(dataset_mean_abs.reshape(1, 4))\n        dataset_mean_abs.index
+          = [blob.name.split(\"/\")[-1]]\n        merged_data = merged_data.append(dataset_mean_abs)\n\n    merged_data.columns
+          = [''bearing-1'', ''bearing-2'', ''bearing-3'', ''bearing-4'']\n\n    #
+          Transform data file index to datetime and sort in chronological order\n    merged_data.index
+          = pd.to_datetime(merged_data.index, format=''%Y.%m.%d.%H.%M.%S'')\n    merged_data
+          = merged_data.sort_index()\n\n    # Drop the raw_data into a bucket\n    #DEST_FILE_NAME
+          = \"raw_data.csv\"\n    #DEST_BUCKET_NAME = \"rrusson-kubeflow-test\"\n    f
+          = StringIO()\n    merged_data.to_csv(f)\n    f.seek(0)\n    client.get_bucket(dest_bucket_name).blob(dest_file_name).upload_from_file(f,
+          content_type=''text/csv'')\n\n    return (dest_bucket_name, dest_file_name)\n\ndef
+          _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,
+          str):\n        raise TypeError(''Value \"{}\" has type \"{}\" instead of
+          str.''.format(str(str_value), str(type(str_value))))\n    return str_value\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Load raw data'', description=''Retrieves
+          the sample files, combines them, and outputs the desting location in GCS.'')\n_parser.add_argument(\"--project-id\",
+          dest=\"project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--source-bucket-name\",
+          dest=\"source_bucket_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--prefix\",
+          dest=\"prefix\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--dest-bucket-name\",
+          dest=\"dest_bucket_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--dest-file-name\",
+          dest=\"dest_file_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = load_raw_data(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,
+          output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "gcr.io/mwpmltr/rrusson_kubeflow_base:v1"}}, "inputs": [{"name":
+          "project_id", "type": "String"}, {"name": "source_bucket_name", "type":
+          "String"}, {"name": "prefix", "type": "String"}, {"name": "dest_bucket_name",
+          "type": "String"}, {"name": "dest_file_name", "type": "String"}], "name":
+          "Load raw data", "outputs": [{"name": "dest_bucket_name", "type": "String"},
+          {"name": "dest_file_name", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}'}
+  arguments:
+    parameters:
+    - {name: project_id}
+    - {name: source_bucket_name}
+    - {name: prefix}
+    - {name: dest_bucket_name}
+    - {name: dest_file_name}
+    - {name: dataset_location, value: US}
+  serviceAccountName: pipeline-runner
