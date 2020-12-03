@@ -3,11 +3,11 @@
 from typing import NamedTuple
 
 
-def load_raw_data(project_id: str, 
-                  source_bucket_name: str, 
+def load_raw_data(source_bucket_name: str, 
                   prefix: str,
                   dest_bucket_name: str,
-                  dest_file_name: str) -> NamedTuple('Outputs', [('dest_bucket_name', str), ('dest_file_name', str)]):
+                  dest_file_name: str) -> NamedTuple('Outputs', [('dest_bucket_name', str), 
+                                                                 ('dest_file_name', str)]):
     
     """Retrieves the sample files, combines them, and outputs the desting location in GCS."""
     import pandas as pd
@@ -47,5 +47,61 @@ def load_raw_data(project_id: str,
 #load_raw_data('', source_bucket_name='amazing-public-data', prefix='bearing_sensor_data/bearing_sensor_data/', dest_bucket_name='rrusson-kubeflow-test', dest_file_name='raw_data.csv')
 
 
-def train_test_split():
-    pass
+def split_data(bucket_name: str, 
+               source_file: str,
+               split_time: str, 
+               preprocess: bool) -> NamedTuple('Outputs', [('bucket_name', str), 
+                                                           ('train_dest_file', str), 
+                                                           ('test_dest_file', str)]):
+    
+    from sklearn.preprocessing import MinMaxScaler
+    from google.cloud import storage
+    import pandas as pd
+    import numpy as np
+    from io import StringIO
+    import time
+    
+    # Read in the data from the GCS bucket and format the data
+    data_loc = "gs://{0}/{1}".format(bucket_name, source_file)
+    data = pd.read_csv(data_loc, index_col=0)
+    #data.index.rename('time', inplace=True)
+    first_idx = data.index.values[0]
+
+    # Split the data based on the split_time param
+    data = data.sort_index()
+    train_data = data.loc[first_idx:split_time]  # Note: this is 'inclusive' so the last data point in train data
+    test_data = data.loc[split_time:]            # shows up as the first data point in the test data
+                                                 # This shouldn't be a big deal for this dataset
+    
+    # Preprocess the data (if applicable)
+    if preprocess:
+        scaler = MinMaxScaler()
+        X_train = scaler.fit_transform(train_data)
+        X_test = scaler.transform(test_data)
+    
+    else:
+        X_train = train_data.to_numpy()
+        X_test = test_data.to_numpy()
+        
+    scaled_train_data = pd.DataFrame(X_train, columns=data.columns)
+    scaled_test_data = pd.DataFrame(X_test, columns=data.columns)
+    
+    # Save the data splits off to GCS bucket
+    train_f = StringIO()
+    test_f = StringIO()
+    
+    scaled_train_data.to_csv(train_f)
+    scaled_test_data.to_csv(test_f)
+    
+    train_f.seek(0)
+    test_f.seek(0)
+    
+    train_dest_file = "train_{}.csv".format(time.perf_counter())
+    test_dest_file = "test_{}.csv".format(time.perf_counter())
+    
+    client = storage.Client()
+    client.get_bucket(bucket_name).blob(train_dest_file).upload_from_file(train_f, content_type='text/csv')
+    client.get_bucket(bucket_name).blob(test_dest_file).upload_from_file(test_f, content_type='text/csv')
+    
+    # Return the location of the new data splits
+    return (bucket_name, train_dest_file, test_dest_file)

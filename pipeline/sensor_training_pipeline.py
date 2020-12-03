@@ -1,5 +1,6 @@
 import os
 from func_components import load_raw_data
+from func_components import split_data
 from jinja2 import Template
 import kfp
 from kfp.components import func_to_container_op
@@ -22,8 +23,12 @@ USE_KFP_SA = os.getenv('USE_KFP_SA')
 component_store = kfp.components.ComponentStore(
     local_search_paths=None, url_search_prefixes=[COMPONENT_URL_SEARCH_PREFIX])
 
+# Create all the component ops
+caip_train_op = component_store.load_component('ml_engine/train')
 retrieve_raw_data_op = func_to_container_op(
     load_raw_data, base_image=BASE_IMAGE)
+split_preprocess_data_op = func_to_container_op(
+    split_data, base_image=BASE_IMAGE)
 
 
 # Define the pipeline
@@ -32,6 +37,7 @@ retrieve_raw_data_op = func_to_container_op(
     description='The pipeline for training and deploying an anomaly detector based on an autoencoder')
 
 def pipeline_run(project_id,
+                 region,
                  source_bucket_name, 
                  prefix,
                  dest_bucket_name,
@@ -39,8 +45,26 @@ def pipeline_run(project_id,
                  dataset_location='US'):
     
     # Read in the raw sensor data from the public dataset and load in the project bucket
-    raw_data = retrieve_raw_data_op(project_id,
-                                    source_bucket_name,
+    raw_data = retrieve_raw_data_op(source_bucket_name,
                                     prefix,
                                     dest_bucket_name,
                                     dest_file_name)
+    
+    # Preprocess and split the raw data by time
+    split_data = split_preprocess_data_op(raw_data.outputs['dest_bucket_name'],
+                                          raw_data.outputs['dest_file_name'],
+                                          '2004-02-15 12:52:39',
+                                          True)
+    
+    # Set up the training args
+    train_args = ["--bucket", split_data.outputs['bucket_name'],
+                  "--train_file", split_data.outputs['train_dest_file'],
+                  "--test_file", split_data.outputs['test_dest_file'],
+                  "--epochs", 100,
+                  "--batch_size", 10]
+    
+    # Train the model on AI Platform
+    train_model = caip_train_op(project_id,
+                                region=region,
+                                master_image_uri=TRAINER_IMAGE,
+                                args=train_args)
