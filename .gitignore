@@ -2,3 +2,5 @@ lab-02-kfp-pipeline/
 .ipynb_checkpoints/
 __pycache__
 *.h5
+*.png
+*.csv

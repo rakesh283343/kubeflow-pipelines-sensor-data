@@ -105,3 +105,22 @@ def split_data(bucket_name: str,
     
     # Return the location of the new data splits
     return (bucket_name, train_dest_file, test_dest_file)
+
+
+def disp_loss(job_id: str) -> str:
+    
+    import json
+    
+    metadata = {
+        'outputs' : [{
+        'type': 'web-app',
+        'storage': 'inline',
+        'source': '<h1>Hello, World!</h1>',
+        }]
+    }
+    
+    with open('/mlpipeline-ui-metadata.json', 'w') as f: 
+        json_string = json.dumps(metadata)
+        f.write(json_string) 
+        
+    return job_id
